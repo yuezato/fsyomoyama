@@ -210,7 +210,7 @@ bpftraceで書いた自作のI/Oレイテンシチェッカを使います。
 + `/dev/sdb` 向けの I/Oリクエスト をターゲットにして https://github.com/yuezato/fsprof/blob/master/req_lat.bt#L6
 + I/OリクエストがデバイスドライバからHDDに向かって飛び出して、HDDがwrite completionを上げるまでの時間（レイテンシ）を測定
 
-bpftrace(https://github.com/iovisor/bpftrace)は超便利なので、使ったことがない方は使ってみてください。
+bpftrace( https://github.com/iovisor/bpftrace )は超便利なので、使ったことがない方は使ってみてください。
 Ubuntuならインストールガイド https://github.com/iovisor/bpftrace/blob/master/INSTALL.md の通りやると、
 サクッと入ると思います。
 
