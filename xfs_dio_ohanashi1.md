@@ -474,4 +474,69 @@ xfsがwriteを呼び出した際に内部で呼び出す `iomap_dio_rw` カー�
 eBFPを使うとコレぐらい肉薄した推理を繰り広げることができます。
 
 ## 7. 新規にファイルを作ってベンチするから`iomap_dio_zero`が呼び出されるなら、巨大なファイルを予め作ってベンチしたら？？？
-続く
+`iomap_dio_zero`のextendになるという条件を外せば良いという考え方ですね。確かに速くなりそう
+
+まずファイルを作り
+```
+yuezato@ubuntu:~/diskbenchi$ rm wks/bench; sync; sync; time ./target/release/diskbenchi --of wks/bench --bs $((2*1024*1024)) --count 3000 --offset $((4096-512))
+Opt {
+    bs: 2097152,
+    count: 3000,
+    of: "wks/bench",
+    offset: Some(
+        3584,
+    ),
+    hugepool: false,
+}
+
+real    0m31.858s // 32秒ぐらいか〜
+user    0m0.024s
+sys     0m0.615s
+```
+
+次は削除せずにもう一度実行する
+```
+yuezato@ubuntu:~/diskbenchi$ sync; sync; time ./target/release/diskbenchi --of wks/bench --bs $((2*1024*1024)) --count 3000 --offset $((4096-512))
+Opt {
+    bs: 2097152,
+    count: 3000,
+    of: "wks/bench",
+    offset: Some(
+        3584,
+    ),
+    hugepool: false,
+}
+
+real    0m38.954s // 39秒？？
+user    0m0.017s
+sys     0m0.424s
+```
+
+39秒？？ 遅くなってるじゃん
+
+```
+yuezato@ubuntu:~/fsprof$ sudo ./req_lat.bt
+Attaching 3 probes..
+sec: 37063, size: 688128, segs: 168, time:3.336[ms]
+sec: 38407, size: 688128, segs: 168, time:1.457[ms]
+sec: 39751, size: 688128, segs: 168, time:6.258[ms]
+sec: 41095, size: 32768, segs: 8, time:3.36[ms]
+
+sec: 41159, size: 688128, segs: 168, time:3.417[ms]
+sec: 42503, size: 688128, segs: 168, time:1.478[ms]
+sec: 43847, size: 688128, segs: 168, time:1.473[ms]
+sec: 45191, size: 32768, segs: 8, time:3.54[ms]
+
+sec: 45255, size: 688128, segs: 168, time:3.400[ms]
+sec: 46599, size: 688128, segs: 168, time:1.440[ms]
+sec: 47943, size: 688128, segs: 168, time:1.458[ms]
+sec: 49287, size: 32768, segs: 8, time:3.42[ms]
+
+sec: 49351, size: 688128, segs: 168, time:3.295[ms]
+sec: 50695, size: 688128, segs: 168, time:1.431[ms]
+sec: 52039, size: 688128, segs: 168, time:6.237[ms]
+sec: 53383, size: 32768, segs: 8, time:3.42[ms]
+```
+😭
+
+ということで次回に続きます
