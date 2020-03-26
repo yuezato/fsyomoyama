@@ -108,7 +108,7 @@ sys     0m0.584s
 なんかちょっと差がついてない……？
 
 書き込み回数を3000回にしてみよう
-```
+```shell
 yuezato@ubuntu:~/diskbenchi$ rm -f wks/bench && time ./target/release/diskbenchi --of wks/bench --bs $((2*1024*1024)) --count 3000 --offset 0
 Opt {
     bs: 2097152,
@@ -142,7 +142,7 @@ sys     0m0.665s
 なんか差が開いてないですかね？
 
 4000回にしてみると
-```
+```shell
 yuezato@ubuntu:~/diskbenchi$ rm -f wks/bench && time ./target/release/diskbenchi --of wks/bench --bs $((2*1024*1024)) --count 4000 --offset 0
 Opt {
     bs: 2097152,
