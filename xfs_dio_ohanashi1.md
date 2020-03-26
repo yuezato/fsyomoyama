@@ -297,34 +297,117 @@ sec: 3985544, size: 32768, segs: 8, time:0.222[ms]
 
 次に`offset`をなぜか遅くなってしまう`3584`にしてlatencyを同様に採集してみると次のようになります:
 ```
+yuezato@ubuntu:~/fsprof$ sudo ./req_lat.bt
+Attaching 3 probes...
+sec: 409800, size: 3584, segs: 1, time:0.248[ms]
+sec: 409807, size: 688128, segs: 168, time:1.732[ms]
+sec: 411151, size: 688128, segs: 168, time:1.694[ms]
+sec: 412495, size: 688128, segs: 168, time:1.694[ms]
+sec: 413839, size: 33280, segs: 9, time:0.219[ms]
+
+sec: 413903, size: 512, segs: 1, time:0.144[ms]
+sec: 413904, size: 687616, segs: 168, time:2.413[ms]
+sec: 415247, size: 688128, segs: 168, time:1.458[ms]
+sec: 416591, size: 688128, segs: 168, time:2.165[ms]
+sec: 417935, size: 33280, segs: 9, time:0.229[ms]
+...
+...
+sec: 434383, size: 512, segs: 1, time:0.442[ms] ★
 sec: 434384, size: 687616, segs: 168, time:4.70[ms]
 sec: 435727, size: 688128, segs: 168, time:1.734[ms]
 sec: 437071, size: 688128, segs: 168, time:1.712[ms]
 sec: 438415, size: 33280, segs: 9, time:0.230[ms]
-sec: 438479, size: 512, segs: 1, time:0.162[ms]
 
+sec: 438479, size: 512, segs: 1, time:0.162[ms]
 sec: 438480, size: 687616, segs: 168, time:4.822[ms]
 sec: 439823, size: 688128, segs: 168, time:1.497[ms]
 sec: 441167, size: 688128, segs: 168, time:1.727[ms]
 sec: 442511, size: 33280, segs: 9, time:0.215[ms]
-sec: 442575, size: 512, segs: 1, time:0.158[ms]
 
+sec: 442575, size: 512, segs: 1, time:0.158[ms]
 sec: 442576, size: 687616, segs: 168, time:5.530[ms]
 sec: 443919, size: 688128, segs: 168, time:1.838[ms]
 sec: 445263, size: 688128, segs: 168, time:1.690[ms]
 sec: 446607, size: 33280, segs: 9, time:0.217[ms]
 sec: 446671, size: 512, segs: 1, time:0.154[ms]
 ```
-`687616 + 688128*2 + 33280 + 512`のパターンが繰り返されているのですが、これって実は2MiBより大きいんですよね。512バイト多い。
-（参考: https://www.wolframalpha.com/input/?i=2+*+1024+*+1024+%3C+687616+%2B+688128+*+2+%2B+33280+%2B+512&lang=ja )
+`512 + 687616 + 688128*2 + 33280`のパターンが繰り返されているのですが、これって実は2MiBより大きいんですよね。512バイト多い。
+（参考: https://www.wolframalpha.com/input/?i=2+*+1024+*+1024+%3C+512+%2B+687616+%2B+688128*2+%2B+33280&lang=ja )
 
-しかも各パターンの先頭の書き込みがなんかこう、遅くないですか？他は2msぐらいなのに、688KB前後の書き込みで5ms秒ぐらいに膨れ上がっている。なぜ？
+2MiBの書き込みが512バイト余分に増えてたら、xfsのバグじゃん！！と思うのですが、実はそうではないんですなこれが……。
+そうでないと言い切れる説明をしていきます。
+その説明の前に、687616バイトの書き込みがどうも毎回遅いんですよね。他は2msぐらいなのに、688KB前後の書き込みで5ms秒ぐらいに膨れ上がっている。なぜ？
+ここが遅くなる原因の気がします。
 
-この **「なぜ？」** を解明するために、secの数字の増え方を調べます。あっ、secというのは遅くなったのですが、HDD上のセクタ位置のことを表しています。
-先頭のパターンに注目します:
-1. 434384セクタから687616バイト=1343セクタ書き込むと、435727
-2. 実際に次は435727に書き込んでいるから良さそう。
-3. そこから688128バイト=1344セクタ書き込むと、437071、良さそう
-4. 次も688128バイト=1344セクタ書き込むと、438415、良さそう
-5. 次は33280バイト=65セクタ書き込むから、次は438415+65=438480から書き込む筈だ
-6. あれ！？ そしたら `sec: 438479, size: 512, segs: 1, time:0.162[ms]` ってナニモン！？
+しかし遅くなる以前に、余分な512バイトの先に突き止めたいと思います。そうすると自ずと遅くなる原因が分かります。
+
+とりあえずsecの増え方に注目してみます。説明のため、★をつけた`sec: 434383, size: 512, segs: 1, time:0.442[ms] ★`のところから
+1. 434383セクタから512バイト=1セクタ書き込むと、434384セクタだ。実際に次はそこから書き込んでいるので、ヨシ
+2. 434384セクタから687616バイト=1343セクタ書き込むと、435727。ヨシ
+4. そこから688128バイト=1344セクタ書き込むと、437071。ヨシ
+5. 次も688128バイト=1344セクタ書き込むと、438415。ヨシ
+6. 次は33280バイト=65セクタ書き込むから、次は438415+65=438480から書き込む筈だ
+7. あれ！？ 次は `sec: 438479, size: 512, segs: 1, time:0.162[ms]` になってる
+
+ということは、33280バイト書いた最後の1セクタが、次の1セクタに上書きされている……？
+
+上書きされているとすると、ここから次の2つが導けます
+a. やっぱり本質的には2MiBしか書き込んでいない。
+b. 33280バイト書き込みが完了するまで、次の512バイトでの上書きができず、この待ち合わせが（なぜか）687616の書き込みに現れている？
+
+## 512バイトの上書きはどこから来るのか？
+これは別のIOプロファイラを使うと説明がつきます: https://github.com/yuezato/fsprof/blob/master/iomap_dio_trace.bt
+だいぶ細かい情報が出てしまうので、出力を整形したものを次に記載します:
+```
+vfs_write {
+|new_sync_write {
+||iomap_dio_rw (sync=1) {
+|||iomap_apply (pos = 176164352, length = 2097152) {
+||||iomap_dio_bio_actor(inode->i_size = 176164352, pos = 176164352, length = 512, dio->flags | DIO_WRITE = 1) {
+|||||generic_make_request (bio.iter_size = 512);
+||||}
+|||}
+|||iomap_apply (pos = 176164864, length = 2096640) {
+||||iomap_dio_bio_actor(inode->i_size = 176164352, pos = 176164864, length = 2096640, dio->flags | DIO_WRITE = 1) {
+|||||generic_make_request (bio.iter_size = 2096640);
+|||||generic_make_request (bio.iter_size = 1409024);
+|||||generic_make_request (bio.iter_size = 720896);
+|||||generic_make_request (bio.iter_size = 32768);
+|||||iomap_dio_zero (pos = 165678592) {
+||||||generic_make_request (bio.iter_size = 512);
+|||||}
+||||}
+|||}
+||}
+|}
+}
+```
+これはwriteシステムコールのうちで、I/O requestの形成に関わる部分を抜粋するトレーサです。
+上からみていくと
+1. 2097152=2MiBの書き込みから、まず512バイトのrequestが作られ
+2. 残り2096640バイトから687616バイトのrequestが作られ、
+3. 残り1490924バイトから688128バイトのrequestが作られ、
+4. 残り720896バイトから688128バイトのrequestが作られ、
+5. 残った32768バイトのrequestを作った後に
+6. `iomap_dio_zero`という関数の中で「追加で512バイト」のrequestが生成されます。
+
+実は上で見た6512, 687616, 688128*2, 33280というI/Oリクエストは、
+このカーネル内部で生成されたrequestの最後2つ（32768 + 512）が結合したものです。
+
+`iomap_dio_zero`が謎の512バイトの追加requestを生成しなければ、全て丸く収まるはずです。
+
+** iomap_dio_zeroとは……?
+https://elixir.bootlin.com/linux/v5.0/source/fs/iomap.c#L1732 から呼び出される
+`iomap_dio_zero` https://elixir.bootlin.com/linux/v5.0/source/fs/iomap.c#L1579 に焦点を絞ります。
+
+といっても、`iomap_dio_zero`の実装ではなく、「なぜこれが呼び出されるか？」を説明する必要があります。
+まあこれは https://elixir.bootlin.com/linux/v5.0/source/fs/iomap.c#L1721 からはじまる4行のコメントに答えが書いているのですが。
+
+引用します
+> 	/*
+>	 * We need to zeroout the tail of a sub-block write if the extent type
+>	 * requires zeroing or the write extends beyond EOF. If we don't zero
+>	 * the block tail in the latter case, we can expose stale data via mmap
+>	 * reads of the EOF block.
+>	 */
+> https://elixir.bootlin.com/linux/v5.0/source/fs/iomap.c#L1720
