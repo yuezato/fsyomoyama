@@ -3,7 +3,7 @@
 それを書き留めていきます。
 
 ## XFSでのベンチマークで不思議なことが起こったので調べた話
-https://github.com/yuezato/fsyomoyama/blob/master/xfs_dio_ohanashi1.md
+https://github.com/yuezato/fsyomoyama/blob/master/xfs_dio_ohanashi.md
 
 ## 論理512バイト物理4096バイトHDD（XFS不思議ベンチの続き）
 WIP https://github.com/yuezato/fsyomoyama/blob/master/AFT_HDD.md
