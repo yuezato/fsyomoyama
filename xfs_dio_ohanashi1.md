@@ -383,7 +383,7 @@ vfs_write {
 |||||generic_make_request (bio.iter_size = 1409024);
 |||||generic_make_request (bio.iter_size = 720896);
 |||||generic_make_request (bio.iter_size = 32768);
-|||||iomap_dio_zero (pos = 165678592) {
+|||||iomap_dio_zero (pos = 178261504, len = 512) {
 ||||||generic_make_request (bio.iter_size = 512);
 |||||}
 ||||}
@@ -406,7 +406,7 @@ vfs_write {
 
 `iomap_dio_zero`が謎の512バイトの追加requestを生成しなければ、全て丸く収まるはずです。
 
-** 5. iomap_dio_zeroとは……?
+## 5. iomap_dio_zeroとは……?
 https://elixir.bootlin.com/linux/v5.0/source/fs/iomap.c#L1732 から呼び出される
 `iomap_dio_zero` https://elixir.bootlin.com/linux/v5.0/source/fs/iomap.c#L1579 に焦点を絞ります。
 
@@ -414,10 +414,64 @@ https://elixir.bootlin.com/linux/v5.0/source/fs/iomap.c#L1732 から呼び出さ
 まあこれは https://elixir.bootlin.com/linux/v5.0/source/fs/iomap.c#L1721 からはじまる4行のコメントに答えが書いているのですが。
 
 引用します
-> 	/*
->	 * We need to zeroout the tail of a sub-block write if the extent type
->	 * requires zeroing or the write extends beyond EOF. If we don't zero
->	 * the block tail in the latter case, we can expose stale data via mmap
->	 * reads of the EOF block.
->	 */
-> https://elixir.bootlin.com/linux/v5.0/source/fs/iomap.c#L1720
+```
+/*
+ * We need to zeroout the tail of a sub-block write if the extent type
+ * requires zeroing or the write extends beyond EOF. If we don't zero
+ * the block tail in the latter case, we can expose stale data via mmap
+ * reads of the EOF block.
+ */
+https://elixir.bootlin.com/linux/v5.0/source/fs/iomap.c#L1720
+```
+
+このコメントに対応する式は
+```
+zero_tail:
+	if (need_zeroout ||
+	    ((dio->flags & IOMAP_DIO_WRITE) && pos >= i_size_read(inode))) {
+		/* zero out from the end of the write to the end of the block */
+		pad = pos & (fs_block_size - 1);
+		if (pad)
+			iomap_dio_zero(dio, iomap, pos, fs_block_size - pad);
+	}
+https://elixir.bootlin.com/linux/v5.0/source/fs/iomap.c#L1726     
+```
+
+さて、今回重要なのは `pos >= i_size_read(inode)` であり、かつ `pos & (fs_block_size - 1)` が非零であれば、`iomap_dio_zero`を呼び出すというところです。
+
+```
+|||iomap_apply (pos = 176164864, length = 2096640) {
+||||iomap_dio_bio_actor(inode->i_size = 176164352, pos = 176164864, length = 2096640, dio->flags | DIO_WRITE = 1) {
+|||||generic_make_request (bio.iter_size = 2096640);
+|||||generic_make_request (bio.iter_size = 1409024);
+|||||generic_make_request (bio.iter_size = 720896);
+|||||generic_make_request (bio.iter_size = 32768);
+|||||iomap_dio_zero (pos = 178261504, len = 512) {
+||||||generic_make_request (bio.iter_size = 512);
+|||||}
+||||}
+|||}
+```
+を思い出してみてください。まず今回は新たにファイルを作っているので、各writeごとにファイルサイズは伸びるということで、前半の条件は真になります。
+後半の条件 `pos & (fs_block_size - 1)` は良くあるbit演算のパターンで `pos % fs_block_size` と等しいです。
+
+すなわち、`iomap_dio_zero`は
+1. ファイルをextendしており
+2. しかもファイルシステムのblock_sizeとして中途半端なところにいる場合には、
+3. block_sizeの残り分（fs_block_size - pad)を0で埋めるために `iomap_dio_zero` を呼び出す
+ということに、少なくとも今回は、なっています。
+
+0-paddingをそもそもする必要があるのは、カーネルのコメントの `we can expose stale data via mmap reads of the EOF block.` ですね。
+ファイルのmmapはfilesystemのblocksize単位で行われるので、もし0-paddingしなかった場合は元々あったデータが意図せず露出する（expose）ため、それを防ぎたいから、ということになります。すなわち安全側に倒した処理だと言えます。
+
+
+## 6. まとめ
+xfsがwriteを呼び出した際に内部で呼び出す `iomap_dio_rw` カーネルライブラリ関数が、filesystemのブロックサイズに足りない場合に、
+`iomap_dio_zero`を呼び出して0-paddingしようとする。
+この結果、次のwrite呼び出しが直前の0-paddingがdisk reachするまで「おそらく」待ち合わせることになり、その分だけwriteの返りが遅くなってしまう。
+
+これ以上追うと、HDD内部の挙動をモデリングする羽目になると思うのですが、
+eBFPを使うとコレぐらい肉薄した推理を繰り広げることができます。
+
+## 7. 新規にファイルを作ってベンチするから`iomap_dio_zero`が呼び出されるなら、巨大なファイルを予め作ってベンチしたら？？？
+続く
