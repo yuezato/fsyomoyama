@@ -77,23 +77,25 @@ Configuration:
 要するに **readが1回分増える** ということになります。
 
 # 512バイト書き込み vs 4096バイト書き込み
-## xfs情報
-今回はxfsを使います
-```
-# xfs_info wks
-meta-data=/dev/sdb               isize=512    agcount=4, agsize=61047662 blks
-         =                       sectsz=4096  attr=2, projid32bit=1
-         =                       crc=1        finobt=1, sparse=1, rmapbt=0
-         =                       reflink=0
-data     =                       bsize=4096   blocks=244190646, imaxpct=25
-         =                       sunit=0      swidth=0 blks
-naming   =version 2              bsize=4096   ascii-ci=0, ftype=1
-log      =internal log           bsize=4096   blocks=119233, version=2
-         =                       sectsz=4096  sunit=1 blks, lazy-count=1
-realtime =none                   extsz=4096   blocks=0, rtextents=0
-```
 
 ## まず512バイト書き込み
+```
+loop {
+ write(512);
+ seek(4096 - 512);
+}
+```
+をやります。実際に使うのはこれ: https://gist.github.com/yuezato/3f5b5fdba962defbe4b02f17b38d1212#file-w512-c
+
+```
+root@ubuntu:~/simpledd# time ./w512 --of=/root/wks/bench --count=20000
+count = 20000
+
+real    0m11.799s
+user    0m0.129s
+sys     0m0.896s
+```
+
 `iostat`すると
 ```
 # iostat -x -d -t -p /dev/sdb 1
@@ -103,19 +105,37 @@ sdb           3102.00 3102.00  12408.00  12408.00     0.00  3102.00   0.00  50.0
 
 https://github.com/yuezato/fsprof/blob/master/req_lat.bt を使うと
 ```
-@mq_microtime_stats[512]: count 99999, average 596, total 59670039
+yuezato@ubuntu:~/fsprof$ sudo ./req_lat.bt
+Attaching 3 probes...
+^C
+
+@mq_microtime_stats[4096]: count 3, average 224, total 672
+@mq_microtime_stats[512]: count 20000, average 532, total 10644391
 ```
 1クエリ600μsということなんで、1秒では
 ```
-512 byte * (1sec / 600microsec) to kB = 853kB/s
+512 byte * (1sec / 532microsec) to kB = 962kB/s
 ```
 iostatと微妙に言ってることが違うけどまあええか……
 
 ## 次に4096バイト書き込み
 ```
-# iostat -x -d -t -p /dev/sdb 1
-Device            r/s     w/s     rkB/s     wkB/s   rrqm/s   wrqm/s  %rrqm  %wrqm r_await w_await aqu-sz rareq-sz wareq-sz  svctm  %util
-sdb              0.00 17690.00      0.00  70764.00     0.00     0.00   0.00   0.00    0.00    0.04   0.00     0.00     4.00   0.06 100.00
+loop {
+ write(4096);
+ seek(4096);
+}
+```
+をやります。seekを入れてるのは512でもseekしているから。
+実際に使うプログラムはこれ: https://gist.github.com/yuezato/3f5b5fdba962defbe4b02f17b38d1212#file-w4096-c
+
+実行結果
+```
+# time ./w4096 --of=/root/wks/bench --count=20000
+count = 20000
+
+real    0m5.902s
+user    0m0.076s
+sys     0m0.332s
 ```
 
 req_latの方の結果は
@@ -124,10 +144,10 @@ yuezato@ubuntu:~/fsprof$ sudo ./req_lat.bt
 Attaching 3 probes...
 ^C
 
-@mq_microtime_stats[4096]: count 100000, average 37, total 3736434
+@mq_microtime_stats[4096]: count 20002, average 272, total 5451022
 ```
 
-ということで4096バイトの方がやはり圧倒的に速かったです。
+ということで4096バイトの方が一応速かったです。
 
 # 開始位置も4096バイトアライメントにするべき
 無駄な読み込みを発生させないためには4096バイト書き込みの方が良いのですが、
@@ -146,7 +166,7 @@ Attaching 3 probes...
 
 このことを実際に確認してみましょう。
 
-## 512バイトアラインメントで書き出していく
+## セクタ先頭から512バイト位置で書き出していく
 ```
   512バイト目（セクタ0の512バイト目)から4KiB書く;
   2セクタ目の先頭までseekする;
@@ -159,7 +179,6 @@ Attaching 3 probes...
 という感じでいきます。
 
 実際に使うプログラム: https://gist.github.com/yuezato/3f5b5fdba962defbe4b02f17b38d1212#file-w4096_512-c
-
 
 ```
 # time ./w4096_512 --of=/root/wks/bench --count=20000
@@ -176,35 +195,73 @@ Attaching 3 probes...
 @mq_microtime_stats[4096]: count 20003, average 718, total 14374364
 ```
 
-## 4096バイトアラインメントで書き出していく
+上で位置とバイト数が4096バイトアラインメントだと平均で272μsだったことを考えると、
+ちょい遅い気もします。とはいえμ秒なんですけどね……
+
+でもまあrealでの実行結果はそこそこ差が出ているのでヨシ。
+
+# 冒頭の例をやる
+```ruby
+time(
+3000.times {
+  write(136KiB);
+})
+ =?
+time(
+3000.times {
+ write(4KiB);
+ write(132KiB);
+}) 
 ```
-セクタ0の先頭から4KiB書く;
-2セクタ目の先頭までseekする;
-4KiB書く;
-4セクタ目の先頭までseekする;
-4KiB書く;
-6セクタ目の先頭までseekする;
-...
+これをやってみましょう。
+書き込みは4KiBアラインメントしておいて、ただしオフセットは中途半端な3584(=4096 - 512)バイトにします。
+
+```
+# time ./w136k --of=/root/wks/bench --count=5000
+count = 5000
+
+real    0m3.166s
+user    0m0.023s
+sys     0m0.361s
+
+$ sudo ./req_lat.bt
+Attaching 3 probes...
+^C
+
+@mq_microtime_stats[4096]: count 1, average 261, total 261
+@mq_microtime_stats[139264]: count 5000, average 551, total 2755857
 ```
 
-実際に使うプログラム: https://gist.github.com/yuezato/3f5b5fdba962defbe4b02f17b38d1212#file-w4096_4096-c
+136KiBの書き込みで大体551μ秒です。
 
+それでは4KiB + 132KiBの分割書き込みだと……？
 ```
-# time ./w4096_4096 --of=/root/wks/bench --count=20000
-count = 20000
+# time ./w4k_132k --of=/root/wks/bench --count=5000
+count = 5000
 
-real    0m5.892s
-user    0m0.129s
-sys     0m0.330s
+real    0m21.262s
+user    0m0.046s
+sys     0m0.762s
 
 yuezato@ubuntu:~/fsprof$ sudo ./req_lat.bt
 Attaching 3 probes...
 ^C
 
-@mq_microtime_stats[4096]: count 20001, average 269, total 5386532
+@mq_microtime_stats[4096]: count 5004, average 1925, total 9635536
+@mq_microtime_stats[135168]: count 5000, average 2133, total 10669231
 ```
+**おっそい！！** ミリ秒の世界に突入してるやんけ……
 
-718μsecが269μsecに縮む
+なんで……？
+
+
+## 考察
+136KiBの書き込みで551μ秒というのは、4096バイト倍数位置で512バイトずつ書いていっているのとほぼ同じ時間になっています。
+条件的には、セクタ先頭から512バイトずらした位置から4KiBずつ書いていく718μ秒の方になるかと思うのですが、
+この違いはどこから来るのでしょうか？
+
+136KiBの書き込みではseekを行っていないため、HDD内部のキャッシュが効いて、
+HDDの仕事としては
 
 # 結論
 512e HDD上でDBやストレージシステムを動かす場合は
