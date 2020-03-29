@@ -6,10 +6,7 @@
 https://github.com/yuezato/fsyomoyama/blob/master/xfs_dio_ohanashi.md
 
 ## 論理512バイト物理4096バイトHDD（XFS不思議ベンチの続き）
-WIP https://github.com/yuezato/fsyomoyama/blob/master/AFT_HDD.md
-
-## 謎の688128バイト、または謎の定数168
-まだ
+https://github.com/yuezato/fsyomoyama/blob/master/AFT_HDD.md
 
 ## 1発でHDDにでかいデータを送るには（と、それやる意味があるかどうか）
 * Linuxでは、カーネルのバージョンによりますけど、頑張らない場合は
@@ -18,3 +15,6 @@ WIP https://github.com/yuezato/fsyomoyama/blob/master/AFT_HDD.md
 * 実際にそれを確認しつつ、巨大なリクエストを送るにはどうすれば良いかと、
 それやって何か良いことがあるかどうかを調べます。
 * WIP: https://github.com/yuezato/fsyomoyama/blob/master/LargeRequest.md
+
+## 謎の688128バイト、または謎の定数168
+* 巨大なリクエストを作ろうとした場合に壁になる話
