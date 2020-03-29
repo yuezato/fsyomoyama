@@ -140,8 +140,78 @@ Attaching 3 probes...
 1. 4KiBを前半3584バイトと後半512バイトに分けて、
 2. HDDの先頭1セクタを読み込み、そのsuffixの3584バイトを差し替えて、先頭セクタを上書きし
 3. HDDの2セクタ目を読み込み、そのprefixの512バイトを差し替えて、上書き
+
 ということで2回の読み込みと2回の書き込みが発生します。
+本来は1回の書き込みのつもりだったので、結構厳しいですね…
 
 このことを実際に確認してみましょう。
 
-## hoge
+## 512バイトアラインメントで書き出していく
+```
+  512バイト目（セクタ0の512バイト目)から4KiB書く;
+  2セクタ目の先頭までseekする;
+  8092+512バイト目（セクタ2の512バイト目）から4KiB書く;
+  4セクタ目の先頭までseekする;
+  16384+512バイト目（セクタ4の512バイト目）から4KiB書く;
+  6セクタ目の先頭までseekする;
+  ...
+```
+という感じでいきます。
+
+実際に使うプログラム: https://gist.github.com/yuezato/3f5b5fdba962defbe4b02f17b38d1212#file-w4096_512-c
+
+
+```
+# time ./w4096_512 --of=/root/wks/bench --count=20000
+count = 20000
+
+real    0m15.536s
+user    0m0.100s
+sys     0m0.578s
+
+yuezato@ubuntu:~/fsprof$ sudo ./req_lat.bt
+Attaching 3 probes...
+^C
+
+@mq_microtime_stats[4096]: count 20003, average 718, total 14374364
+```
+
+## 4096バイトアラインメントで書き出していく
+```
+セクタ0の先頭から4KiB書く;
+2セクタ目の先頭までseekする;
+4KiB書く;
+4セクタ目の先頭までseekする;
+4KiB書く;
+6セクタ目の先頭までseekする;
+...
+```
+
+実際に使うプログラム: https://gist.github.com/yuezato/3f5b5fdba962defbe4b02f17b38d1212#file-w4096_4096-c
+
+```
+# time ./w4096_4096 --of=/root/wks/bench --count=20000
+count = 20000
+
+real    0m5.892s
+user    0m0.129s
+sys     0m0.330s
+
+yuezato@ubuntu:~/fsprof$ sudo ./req_lat.bt
+Attaching 3 probes...
+^C
+
+@mq_microtime_stats[4096]: count 20001, average 269, total 5386532
+```
+
+718μsecが269μsecに縮む
+
+# 結論
+512e HDD上でDBやストレージシステムを動かす場合は
+書き込み開始位置も4096バイト揃えにして、
+書き込むバイト数も4096バイトの倍数の、
+徹底した4096バイトアライメントが必要になります。
+
+DBやストレージシステム自体にIOスケジューラを実装している場合は、
+カーネルのIOスケジューラを抜けた後に大体いい感じになることを
+ちゃんと確認しておいた方が良いかもしれません。
